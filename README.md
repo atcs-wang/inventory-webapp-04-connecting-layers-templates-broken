@@ -9,7 +9,7 @@ In this tutorial, we will connect all three layers, making our server render the
 
 ## (4.1) The big picture:
 
-[Two tutorials ago](https://github.com/atcs-wang/inventory-webapp-02-app-server-basics#making-a-simple-app-server-for-our-prototypes), we set up "routes" in `app.js` telling our Express web server to handle incoming HTTP requests from client browsers, and respond (with static HTML files). 
+[Two tutorials ago](https://github.com/atcs-wang/inventory-webapp-02-app-server-basics#making-a-simple-app-server-for-our-prototypes), we set up "routes" in `app.js` telling our Express web server to handle incoming HTTP requests from client browsers, and respond with static HTML files or other static resources. 
 
 >```
 >Browser --- request ---> App Server
@@ -24,7 +24,8 @@ In this tutorial, we will connect all three layers, making our server render the
 >```
 
 
-We will now combine those two concepts into a web server that generally follows the following pattern: 
+We will now combine those two concepts into a web server that responds to HTTP requests in a way that depends on the current state of the database. 
+This kind of server generally follows the following pattern: 
 1. The web server receives an HTTP request
 2. The web server makes a relevant query to the database
 3. The web server waits for the data to be returned
@@ -37,11 +38,11 @@ We will now combine those two concepts into a web server that generally follows 
 > Browser <-- response --- App Server
 >```
 
-In step 4, the format of the response can vary: it could be raw data (like JSON) or fully formed HTML pages. 
+There are a variety of formats the response might take: it could be raw data from the database (e.g. plaintext or JSON) or fully formed HTML pages based on data. Such database-driven HTML pages are considered ***dynamic***, rather than static. 
 
 In the first part of the tutorial, we'll just focus on making our server query the database upon HTTP request, and simply respond with that raw data. 
 
-In the second part of the tutorial, we'll upgrade the reponse to HTML pages rendered dynamically with (that is, *containing*) that data.
+In the second part of the tutorial, we'll upgrade the reponse to HTML pages rendered **dynamically** - that is, *containing* that data.
 
 ## (4.2) Responding with raw data (JSON) [Part 1/2]: 
 
@@ -95,19 +96,23 @@ and run the server again:
 > node app.js
 ```
 
-and visit `localhost:8080/stuff` on your browser. Now, instead of an HTML page, you should see some plaintext with data from the database:
+and visit `localhost:8080/stuff` on your browser. Now, instead of an HTML page, you should see some plaintext with JSON-style data from the database:
 
 ```
-[ { "id": 1, "item": "Widgets", "quantity": 5 }, { "id": 2, "item": "Gizmos", "quantity": 100 }, { "id": 3, "item": "Thingamajig", "quantity": 12345 }, { "id": 4, "item": "Thingamabob", "quantity": 54321 } ]
+[ { "id": 1, "item": "Widgets", "quantity": 5 }, 
+  { "id": 2, "item": "Gizmos", "quantity": 100 }, 
+  { "id": 3, "item": "Thingamajig", "quantity": 12345 }, 
+  { "id": 4, "item": "Thingamabob", "quantity": 54321 } 
+]
 ```
 
 Great! Let's break down the new code:
-- **When does the app server respond now?** The route handler doesn't send a response right away anymore - first, it sends a query to the database, then waits for the query results via *another* handler callback function before responding. (Nested callback functions can be a bit disorienting at first.) 
+- **When does the app server respond now?** The route handler doesn't send a response right away anymore - first, it sends a query to the database, then waits for the query results via another *nested* handler callback function before responding. (Nested callback functions can be a bit disorienting at first.) 
 - **How does the server know if the database executed the query successfully?**  Our database might be respond too slowly or fail to execute the query for a wide range of reasons (e.g. malformed SQL, network failure, database is busy/slow). The opening `if (error)` statement in the callback function is the standard way of checking this. In case of failure, the `error` parameter in the callback function will be some kind of error message object (a "truthy" value). Otherwise, `error` will be `undefined` (a "falsy" value). 
 - **If the database does NOT return results successfully?** Our response should have an appropriate status code of `500 Internal Server Error`. It can be helpful (at least during development) to also report what went wrong, so we can send the error object too. The `res.status(500).send(error)` in the if block accomplishes this.
 - **Otherwise, if the database DOES return results successfully?**  In the else block, `res.send(results)` will send a response with a default `200 OK` status code and a body containing the `results` serialized as JSON (JavaScript Object Notation). 
 
-> If you'd like to see the error message response in play, temporarily change your database password in the `.env` file to force a error. Check both the server logs in the terminal and the browser's developer tools (Inspect -> Network) to confirm that the status code is indeed `500 Internal Server Error`.
+> If you'd like to see the error message response in play, temporarily change your database password in the `.env` file and restart your server to create errors on every request. Check both the server logs in the terminal and the browser's developer tools (Inspect -> Network) to confirm that the status code is indeed `500 Internal Server Error`.
 
 ### 4.2.2 Making the `/stuff/item` route respond with data
 
@@ -168,8 +173,8 @@ If you run your server again and navigate your browser to `localhost:8080/stuff/
 
 Notice the route handler is very similar (for now) to the `/stuff` route from earlier. The only differences are:
 
-1. To assign the placeholder `?` in the SQL a value of `1`, the second parameter of the `db.execute()` method is passed an array containing `1`. This technique is known as a "prepared statement", and was demonstrated in `db/db_init.js` in the previous tutorial.
-2. The response only sends the element in the first index of the results, not the entire results object. Results for a `SELECT` statement are always arrays, even if only one row is selected.
+1. To assign the placeholder `?` in the SQL a value of `1`, the second parameter of the `db.execute()` method is passed an array containing `1`. This technique is known as a "prepared statement", and was demonstrated in `db/db_init.js` in the previous tutorial. (There is more discussion about prepared statements and why they are used below...)
+2. Results for a `SELECT` statement are always arrays, even if only one row is selected. The response here only needs to send the element in the first index of the results, not the entire results array. (Of course, if no such element exists, an `undefined` will be sent instead! We'll also address this more below.. )
 
 
 #### (4.2.2.2) URL parameters - allowing the client to specify prepared statement values.
@@ -202,11 +207,9 @@ app.get( "/stuff/item/:id", ( req, res, next ) => {
 
 Test it by navigating your browser to `localhost:8080/stuff/item/1`, then replace the `1` with `2` and other numbers. You should see data for the various corresponding items. 
 
-> Why are we using "prepared statements" instead of using concatenation or `string.replace` to construct the SQL query from the URL parameter? A malicious user could put anything at all in the URL parameter, including parts of or whole SQL statements, potentially causing the database to execute SQL statements the developers didn't intend to be run. 
+> Why are we using "prepared statements" to construct the SQL query from the URL parameter, instead of simple concatenation, backtick string literals, or even `string.replace`? A user can put anything at all in the URL parameter - so malicious users might try to "inject" their own custom SQL statements, potentially causing the database to execute SQL statements the developers didn't intend to be run. This is called an **SQL injection attack**, and is primarily attempted in order to gain unauthorized access to protected data.
 >
->This is called an **SQL injection attack**, and are primarily used to gain unauthorized access to protected data. A [popular xkcd comic](https://xkcd.com/327/) gives a humorous hypothetical of what kind mayhem SQL injections could cause an unprotected system. 
->
->Although our app doesn't *yet* have any such authorization limits, it is wise to always use protective techniques like prepared statements or "escaping" values that prevent treating user-provided inputs like executable SQL.
+> Although our app doesn't have any such authorization limits *yet*, we still don't want any security holes that invite mayhem (see the [popular xkcd comic](https://xkcd.com/327/) which gives a humorous idea of the kind of mayhem SQL injections could cause). Thankfully, prepared statements perform a number of "sanitization" measures to prevent injection, essentially "escaping" inputs so they are not ever interpreted as executable SQL commands.
 
 #### (4.2.2.3) Send a 404 when item not found.
 
@@ -222,7 +225,7 @@ Update the callback code with a new "else if" clause:
         res.send(results[0]); // results is still an array
 ```
 
-Test the server again by navigating your browser to `localhost:8080/stuff/item/BADID` or any other invalid `:id` value. Confirm that the message is sent. 
+Test the server again by navigating your browser to a URL with an invalid `:id` value, such as `localhost:8080/stuff/item/BADID` or any other . Confirm that the "No item found..." message is sent. 
 > You can also confirm that both the server logs in the terminal and the browser's developer tools (Inspect -> Network) show the status code is indeed `404 Not Found`.
 
 ## (4.3) Responding with rendered HTML: 
@@ -232,9 +235,9 @@ We have now seen that Express web servers can either
 **A.** send a *pre-written, static* HTML web page file ([as shown in the previous tutorial]()). We might call that kind of server a "static file server".
 **B.** send *dynamic* JSON data, queried from a database ([as shown in the previous section]()). We might call that kind of server an "API server", since it acts as a thin interface between browsers and the database.
 
-What we really want to do is a third option: send HTML pages that are  *pre-written* with *mostly static* content, but have some parts that are rendered *dynamically* with data queried from the database at the time of the request/response. This technique defines an entire kind of app architecture, and is known as **server side rendering**, or **SSR**.
+What we really want to do is a third hybrid option: send HTML pages that are  *pre-written* with *mostly static* content, but have some parts that are rendered *dynamically* with data queried from the database at the time of the request/response. This technique defines an entire kind of app architecture, and is known as **server side rendering**, or **SSR**.
 
->It is worth noting that our app architecture could take a different direction called **client side rendering (CSR)**  that prefers using API servers. Generally speaking, CSR apps are **single page applications** - just the home page is provided, which then makes calls to the API server for data to *update the page's content without loading a completely different page*. We will briefly explore this architecture in a future tutorial. 
+>It is worth noting that our app architecture could take a very different direction called **client side rendering (CSR)**  that prefers using API servers. Generally speaking, CSR apps are **single page applications** - just the home page is provided, which then makes calls to the API server for data to *update the page's content without loading a completely different page*. We will briefly explore this architecture in a future tutorial. 
 
 ### (4.3.1) Setting up templating with EJS
 
@@ -245,7 +248,8 @@ To help accomplish this, we will introduce the use of **templating** - specifica
 > - [Handlebars](https://handlebarsjs.com/) (based on Mustache)
 > - [Pug](https://pugjs.org/api/getting-started.html) (formerly known as Jade)
 >
-> There are pros and cons to each one, but it mostly comes down to style. Feel free to explore.
+> There are pros and cons to each one, but it mostly comes down to style. Feel free to explore; this particular choice is by 
+> far the easiest part of the tech stack to "switch out." 
 
 First, let's install EJS:
 ```
@@ -254,24 +258,20 @@ First, let's install EJS:
 
 > If you're using VS Code, I also recommend installing the extension **EJS language support** by DigitalBrainstem.
 
-To configure the express app to use EJS as its 'templating engine' (aka 'view engine'), add this code to `app.js` right after the "`//set up the server`" section and before the routing section.
+To configure the express app to use EJS as its **'templating engine'** (aka **'view engine'**), add this code to `app.js` right after the "`//set up the server`" section and before the routing section.
 
 ```js
 //set up the server
 ...
 // Configure Express to use EJS
-const path = require("path");
-app.set( "views", path.join( __dirname, "views" ) );
+app.set( "views",  __dirname + "/views");
 app.set( "view engine", "ejs" );
 ...
-
 ```
 
-> The `path` module, which is also built into Node, provides OS-independent ways to combine directory and file names into valid paths. Ideally, all file paths should be built using the `path` module instead of contacentation.
+The first line specifies the `views` subdirectory as the location of all EJS **templates** (aka **views** or even **view-templates**). Our HTML prototypes are already in the `views` subdirectory, so we start by simply changing their extensions from `.html` to `.ejs`. 
 
-The second line specified the `views` subdirectory as the location of all EJS **templates** (aka **views** or even **view-templates**). 
-
-Our HTML prototypes are already in the `views` subdirectory, so we start by simply changing their extensions from `.html` to `.ejs`. Any valid HTML is already a valid EJS template.
+> Since EJS is technically a "superset" of HTML, any valid HTML file (once the extension is changed to `.ejs`) is already a valid EJS template.
 
 ### (4.3.2) Rendering EJS with data
 
@@ -280,11 +280,19 @@ To render and send any template in `views`, we simply call
 ```js
     res.render(view, ?data);
 ```
-where `view` is the name of the template file (minus the extension), and `data` is an object with all the data we want to pass to the template for dynamic rendering.
+where `view` is the name of the template file (minus the `.ejs`extension), and `data` is an (optional) object with all the data we want to pass to the template for dynamic rendering.
+
+We'll be replacing every `res.sendFile` call to `res.render`, like this: 
+```js
+//replace every instance of:
+    res.sendFile( __dirname + "/views/FILENAME.html" );
+//with:
+    res.render("FILENAME", data);
+```
 
 #### (4.3.2.1) Rendering the homepage (index.ejs) (1/3)
 
-The simplest case is our homepage; we use the `index` view (which corresponds to the `index.ejs` file), but no data is passed since the page is static. We can update the `/` route to this:
+The simplest case is our homepage; we use the `index` view (which corresponds to the `index.ejs` file), but no data is passed since the page is static. We can simply update the `/` route to this:
 
 ```js
 // define a route for the default home page
@@ -362,7 +370,7 @@ But as an EJS file, we can change the static data into this:
 
 Everything between `<% %>` tags in an EJS file gets interpreted as JavaScript snippets. In particular, using the opening tag `<%=` outputs the value of the JS expression into the template. 
 
-All the properties of the `data` object that was passed to `res.render` are variables you can access in the JavaScript. 
+All the properties of the `data` object that was passed to `res.render` are variables you can access in the JavaScript snippets in the EJS file. 
 
 So in `item.ejs`, when you see:
 ```html
@@ -381,7 +389,7 @@ Restart the server and visit `localhost:8080/stuff/item/1`, `/2`, `/3`, and `/4`
 
 #### (4.3.2.3) Rendering the stuff inventory page (stuff.ejs)
 
-Finally, for the `/stuff` route, we want to render the `stuff` view (`stuff.ejs`) with all of the data in `results`, which is an array of objects representing items (each of which contains `id`, `item`, and `quantity` properties).
+Finally, for the `/stuff` route, we want to render the `stuff` view (`stuff.ejs`) with *all* of the data in `results`, which is an array of objects representing items (each of which contains `id`, `item`, and `quantity` properties).
 
 To make the whole `results` array an accessible variable by the EJS, we will set it as a property `inventory` of a new (anonymous) object that we pass as the data parameter to `res.render`.
 
@@ -406,7 +414,7 @@ Now, to use the data in `stuff.ejs`, we update the `<tbody>` element and replace
 
 ```ejs
 <tbody>
-    <% for (let i = 0; i < inventory.length; i++) {%>
+    <% for (let i = 0; i < inventory.length; i++) { %>
     <tr>
         <td><%= inventory[i].item %></td>
         <td><%= inventory[i].quantity %></td>
@@ -424,37 +432,51 @@ Now, to use the data in `stuff.ejs`, we update the `<tbody>` element and replace
 The first JS snippet 
 
 ```ejs
-<% for (let i = 0; i < inventory.length; i++) {%>
+<% for (let i = 0; i < inventory.length; i++) { %>
 ```
 
 starts a for-loop over `inventory` (the `results`). The loop ends with the final snippets `<% } %>`. All the content inside the loop is repeated for each iteration, making a new table row for each element of `inventory`.
 
-The output tags like `<%= inventory[i].item %>` work as before, injecting the values of the expression (each element of inventory's properties) into the HTML.
+The output tags like `<%= inventory[i].item %>` work as before, injecting the values of the expression (each element of inventory's properties/columns) into the HTML.
 
-The most interesting use of the output tags here is setting a hyperlink for the "Info / Edit" button to the corresponding item detail page:
+The most interesting use of the output tags here is setting a hyperlink for the "Info / Edit" button to the corresponding item detail page, based on the `id` property/column:
 
 ```ejs
 <a class="..." href=<%= "/stuff/item/" + inventory[i].id %> >
 ```
 
-Restart the server and visit `localhost:8080/stuff`. Even more magic! You should see the table filled with multiple rows containing information for each item in the database. 
+Restart the server and visit `localhost:8080/stuff`. Even more magic! You should see the table filled with multiple rows containing information for each item in the database - and clicking the buttons navigates to the matching item detail pages!
 
-> Instead of a `for` loop we could instead use a `forEach` loop. The EJS would then look like this:
+> Instead of a `for` loop, you could instead use a `forEach` loop or a `for...of` loop to iterate each element in the array directly.
+> The EJS would then look like either:
 > ```js
->   <% inventory.forEach( elm => {%>
+>   <% inventory.forEach( elm => { %>
 >       <tr>
 >           <td><%= elm.item %></td>
 >           <td><%= elm.quantity %></td>
+>           <td>
+>                <a class="btn-small waves-effect waves-light" href=<%= "/stuff/item/" + elm.id %> >...
 >           ...
 >       </tr>
->   <% });%>
+>   <% }); %>
+>```
+> or
+>```js
+>   <% for( const elm of inventory ) { %>
+>       <tr>
+>           <td><%= elm.item %></td>
+>           <td><%= elm.quantity %></td>
+>           <td>
+>                <a class="btn-small waves-effect waves-light" href=<%= "/stuff/item/" + elm.id %> >...
+>           ...
+>       </tr>
+>   <% } %>
+>```
 
 ## (4.4) Conclusion:
 
 We now have a fully connected 3-layer web app! Using SQL queries and EJS, the server  renders the HTML upon request, transforming our static pages into dynamic ones that deliver live content.
 
-> In the tutorials so far, we first prototyped the pages, then designed the database accordingly, wrote queries, and finally modified the prototype into a template based on the queries. There is no requirement, however, that you always follow the same process: the template could come before the data queries are written, or the database could come before the protoypes. You might even skip the protoype step altogether.
+> In the tutorials so far, we first prototyped the pages, then designed the database accordingly, wrote queries, and finally modified the prototype into a template based on the queries. There is no requirement, however, that you always follow the same process: the template could come before the data queries are written, or the database could come before the protoypes. You might even skip the protoype step altogether, if you have a strong idea of how the various layers will interact from the start.
 
-The next feature to implement would be functional forms and buttons that create, update, and delete entries in the database. 
-
-However, our Node/Express project structure is starting to grow, and it could stand to be reorganized before adding more features. So in the next tutorial, we'll take a brief "detour" to re-structure and learn a few tips and tricks before moving forward. 
+The next steps are to fully implement the forms so that they produce "`POST`" requests to create and update entries in the database, as well as make the delete buttons also update the database. 
