@@ -12,21 +12,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
 
-    <style>
-        form {
-            border: solid 2px lightgrey;
-            padding: 10px;
-            border-radius: 5px;
-        }
+    <link rel="stylesheet" href="/stylesheets/stuffStyle.css">
 
-        form:focus-within {
-            border-color: orange;
-        }
-
-        tr:hover {
-            background-color: #F0F0F0;
-        }
-    </style>
 </head>
 
 <body>
@@ -35,6 +22,9 @@
     <div class="container">
         <div class="section flow-text" id="stuffDetail">
             <h1>Stuff details:</h1>
+            <a class="btn-small waves-effect waves-light" href="/stuff">
+                <i class="material-icons left">arrow_back</i>Return to Inventory
+            </a>
             <table>
                 <tr>
                     <th>Item:</th>
@@ -55,7 +45,7 @@
             <a class="btn-large waves-effect waves-light orange left modal-trigger" href="#stuffEdit">
                 <i class="material-icons right">edit</i>Edit
             </a>
-            <a class="btn-large waves-effect waves-light red right">
+            <a class="btn-large waves-effect waves-light red right"  href="/stuff/item/<%= id %>/delete" %>>
                 <i class="material-icons right">delete</i>Delete
             </a>
         </div>
@@ -66,21 +56,21 @@
             <div class="modal-content">
 
                 <h2>Edit item:</h2>
-                <form>
+                <form method="post" action="/stuff/item/<%= id%>"> <!-- default action is the page's URL --> 
                     <div class="row">
                         <div class="input-field col s6">
-                            <label for="name">Item Name:</label>
-                            <input type="text" name="name" class="validate" data-length="32" required>
+                            <label for="nameInput">Item Name:</label>
+                            <input type="text" name="name" id="nameInput" class="validate" data-length="32" value="<%= item%>" required>
                         </div>
                         <div class="input-field col s6">
-                            <label for="quantity">Item Quantity:</label>
-                            <input type="number" name="quantity" value=1 required>
+                            <label for="quantityInput">Item Quantity:</label>
+                            <input type="number" name="quantity" id="quantityInput" value=<%= quantity%> required>
                         </div>
                     </div>
                     <div class="row">
                         <div class="input-field col s12">
-                            <label for="description">Item Description:</label>
-                            <input type="text" name="description" data-length="100">
+                            <label for="descriptionInput">Item Description:</label>
+                            <input type="text" name="description" id="descriptionInput" data-length="100" value="<%= description%>">
                         </div>
                     </div>
                     <div class="modal-footer">
